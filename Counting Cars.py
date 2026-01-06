@@ -3,6 +3,9 @@ import numpy as np
 from ultralytics import YOLO
 import pandas as pd
 from pathlib import Path
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
 
 
 def intersection_area_xyxy(boxA, boxB):
@@ -229,6 +232,90 @@ def choose_det_from_cluster_using_last_seen(
     chosen_idx = max(cluster_idxs, key=lambda k: dets[k].get("conf", 0.0))
     return chosen_idx, None
 
+def estimate_lanes_elbow_curvature(
+    points_xy,
+    k_max=8,
+    random_state=0,
+    use_log_inertia=False,
+):
+    """
+    Estimate number of clusters using KMeans inertia + max curvature.
+
+    Parameters
+    ----------
+    points_xy : array-like (N,2)
+        Event center coordinates.
+    k_max : int
+        Maximum k to test.
+    random_state : int
+        KMeans random seed.
+    use_log_inertia : bool
+        If True, compute curvature on log(inertia).
+        If False, use raw inertia.
+
+    Returns
+    -------
+    lanes_est : float
+        Possibly non-integer estimated number of lanes.
+    chosen_k : int
+        Integer k at maximum curvature.
+    inertia_by_k : dict[int, float]
+        Raw inertia values for diagnostics.
+    """
+    points_xy = np.asarray(points_xy, dtype=float)
+    n = points_xy.shape[0]
+
+    if n < 3:
+        return np.nan, 0, {}
+
+    k_max_eff = int(min(k_max, n))
+    if k_max_eff < 2:
+        return np.nan, 0, {}
+
+    # Standardise coordinates
+    X = StandardScaler().fit_transform(points_xy)
+
+    ks = list(range(1, k_max_eff + 1))
+    inertias = []
+
+    for k in ks:
+        km = KMeans(n_clusters=k, n_init=10, random_state=random_state)
+        km.fit(X)
+        inertias.append(float(km.inertia_))
+
+    inertias = np.array(inertias, dtype=float)
+    inertia_by_k = {k: v for k, v in zip(ks, inertias)}
+
+    # Choose curve for curvature analysis
+    if use_log_inertia:
+        curve = np.log(inertias + 1e-9)  # numerical safety
+    else:
+        curve = inertias
+
+    # Need at least k >= 3 for curvature
+    if k_max_eff < 3:
+        return float(1.0), 1, inertia_by_k
+
+    # Second discrete difference (curvature proxy)
+    d2 = np.zeros(len(curve))
+    for i in range(1, len(curve) - 1):
+        d2[i] = curve[i - 1] - 2 * curve[i] + curve[i + 1]
+
+    best_i = int(np.argmax(np.abs(d2)))
+    k_star = ks[best_i]
+
+    # ---- Non-integer refinement via quadratic fit ----
+    lanes_est = float(k_star)
+    if 1 <= best_i <= len(curve) - 2:
+        y1, y2, y3 = curve[best_i - 1], curve[best_i], curve[best_i + 1]
+        denom = (y1 - 2 * y2 + y3)
+        if denom != 0:
+            x_vertex = 0.5 * (y1 - y3) / denom
+            lanes_est = k_star + x_vertex
+
+    lanes_est = float(np.clip(lanes_est, 1.0, k_max_eff))
+    return lanes_est, k_star, inertia_by_k
+
 
 # --------------------------------------------------------------------------------
 # Configuration
@@ -380,6 +467,9 @@ for output_ID, video_path in enumerate(video_paths, start=1):
     inout_time_since_last_detection_event = []
     inout_speed_px_per_frame = []
     inout_speed_px_per_second = []
+    inout_center_x = []
+    inout_center_y = []
+
 
     # fallback id assignment when YOLO does not provide an ID
     my_global_id_counter = 10000
@@ -475,7 +565,7 @@ for output_ID, video_path in enumerate(video_paths, start=1):
                     "frames_seen": 1,
                     "frames_since_last_detection_event": 0,
                     "last_frame_seen": frame_idx,
-                    "vel_per_frame": np.array([0.0, 0.0], dtype=float),
+                    "vel_per_frame": np.array([0.0, 0.0], dtype=float)
                 }
                 continue
 
@@ -493,8 +583,9 @@ for output_ID, video_path in enumerate(video_paths, start=1):
             frames_delta = frame_idx - prev["last_frame_seen"]
             if frames_delta <= 0:
                 frames_delta = 1
-            vel_per_frame = delta / frames_delta  # (dx, dy) px per frame
+            
             raw_vel = delta / frames_delta  # px/frame
+            vel_per_frame = raw_vel # aliasing
 
             # Optional: clamp raw velocity magnitude (reject spikes)
             if MAX_SPEED_PX_PER_FRAME is not None:
@@ -523,6 +614,11 @@ for output_ID, video_path in enumerate(video_paths, start=1):
                 inoutframes.append(frame_idx)
                 inoutid.append(vid)
                 inout_detection_time.append(current_seconds)
+                x1c, y1c, x2c, y2c = cd["xyxy"]
+                cx = (x1c + x2c) / 2.0
+                cy = (y1c + y2c) / 2.0
+                inout_center_x.append(cx)
+                inout_center_y.append(cy)
 
                 x1a, y1a, x2a, y2a = prev["xyxy"]
                 x1b, y1b, x2b, y2b = cd["xyxy"]
@@ -663,6 +759,8 @@ for output_ID, video_path in enumerate(video_paths, start=1):
             "Angle_Degrees": inout_angle_degree,
             "Speed_Px_Per_Frame": inout_speed_px_per_frame,
             "Speed_Px_Per_Second": inout_speed_px_per_second,
+            "Event_Center_X": inout_center_x,
+            "Event_Center_Y": inout_center_y,
         }
     )
 
@@ -672,6 +770,18 @@ for output_ID, video_path in enumerate(video_paths, start=1):
         keep="first",
     )
 
+    # Lane estimation based on event centers
+    k_max_lanes = 15
+
+    df_in = df[df["In_Out"] == "In"]
+    df_out = df[df["In_Out"] == "Out"]
+
+    pts_in = df_in[["Event_Center_X", "Event_Center_Y"]].dropna().to_numpy()
+    pts_out = df_out[["Event_Center_X", "Event_Center_Y"]].dropna().to_numpy()
+
+    lanes_in_est, lanes_in_k, lanes_in_inertia = estimate_lanes_elbow_curvature(pts_in, k_max=k_max_lanes)
+    lanes_out_est, lanes_out_k, lanes_out_inertia = estimate_lanes_elbow_curvature(pts_out, k_max=k_max_lanes)
+
     df_fileinfo_lookup = pd.DataFrame(
         {
             "Filename_ID": [output_ID],
@@ -680,6 +790,10 @@ for output_ID, video_path in enumerate(video_paths, start=1):
             "Video_Fps": [fps],
             "Filename": [video_path.name],
             "Output_Video": [output_video_path.name],
+            "Estimated_Lanes_In": [lanes_in_est],
+            "Estimated_Lanes_Out": [lanes_out_est],
+            "Estimated_Lanes_Method": ["kmeans_inertia_curvature"],
+            "Estimated_Lanes_kmax": [k_max_lanes]
         }
     )
 
@@ -694,12 +808,20 @@ for output_ID, video_path in enumerate(video_paths, start=1):
         groupby=["In_Out", "Filename_ID", "Video_Length (s)"],
         Count_Cars=("In_Out", "count"),
         Avg_Angle=("Angle_Degrees", "mean"),
-        Avg_Speed_Px_Per_Second=("Speed_Px_Per_Second", "mean")
+        Avg_Speed_Px_Per_Second=("Speed_Px_Per_Second", "mean"),
+        Estimated_Lanes_In=("Estimated_Lanes_In","max"),
+        Estimated_Lanes_Out=("Estimated_Lanes_Out","max")
     )
     if "Video_Length (s)" in df_total_in_out.columns and (df_total_in_out["Video_Length (s)"] != 0).all():
-        df_total_in_out["Cars per Second"] = df_total_in_out["Count_Cars"] / df_total_in_out["Video_Length (s)"]
+        df_total_in_out["Cars_per_Second"] = df_total_in_out["Count_Cars"] / df_total_in_out["Video_Length (s)"]
+        df_total_in_out["Cars_per_Lane_In_per_Second"] = df_total_in_out["Count_Cars"] / (df_total_in_out["Video_Length (s)"] * df_total_in_out["Estimated_Lanes_In"])
+        df_total_in_out["Cars_per_Lane_Out_per_Second"] = df_total_in_out["Count_Cars"] / (df_total_in_out["Video_Length (s)"] * df_total_in_out["Estimated_Lanes_Out"])
+        df_total_in_out["Avg_Cars_per_Lane_per_Second"] = (df_total_in_out["Cars_per_Lane_Out_per_Second"] + df_total_in_out["Cars_per_Lane_In_per_Second"])/2
     else:
-        df_total_in_out["Cars per Second"] = np.nan
+        df_total_in_out["Cars_per_Second"] = np.nan
+        df_total_in_out["Cars_per_Lane_In_per_Second"] = np.nan
+        df_total_in_out["Cars_per_Lane_Out_per_Second"] = np.nan
+        df_total_in_out["Avg_Cars_per_Lane_per_Second"] = np.nan
 
     # Write CSVs
     df_full.to_csv(output_total_csv_path, index=False)
