@@ -1,0 +1,2 @@
+Filename_ID,Video_Length (s),Video_Total_Frames,Video_Fps,Filename,Output_Video,Estimated_Lanes_In,Estimated_Lanes_Out,Estimated_Lanes_Method,Estimated_Lanes_kmax
+2,11.072222827272729,330,29.713997372742377,road_video_2.mp4,road_video_2_tracked.mp4,3.5079297994760936,2.534916194283076,kmeans_inertia_curvature,15
