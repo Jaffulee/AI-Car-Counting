@@ -798,6 +798,11 @@ for output_ID, video_path in enumerate(video_paths, start=1):
     )
 
     df_full = pd.merge(df, df_fileinfo_lookup, how="left", on="Filename_ID")
+    df_full["Estimated_Lanes"] = np.where(
+        df_full["In_Out"].eq("In"),
+        df_full["Estimated_Lanes_In"],
+        df_full["Estimated_Lanes_Out"],
+    )
 
     def sql_groupby(df_, as_index=False, **kwargs):
         groupby_cols = kwargs.pop("groupby")
@@ -809,19 +814,17 @@ for output_ID, video_path in enumerate(video_paths, start=1):
         Count_Cars=("In_Out", "count"),
         Avg_Angle=("Angle_Degrees", "mean"),
         Avg_Speed_Px_Per_Second=("Speed_Px_Per_Second", "mean"),
-        Estimated_Lanes_In=("Estimated_Lanes_In","max"),
-        Estimated_Lanes_Out=("Estimated_Lanes_Out","max")
+        Estimated_Lanes=("Estimated_Lanes","max")
     )
     if "Video_Length (s)" in df_total_in_out.columns and (df_total_in_out["Video_Length (s)"] != 0).all():
         df_total_in_out["Cars_per_Second"] = df_total_in_out["Count_Cars"] / df_total_in_out["Video_Length (s)"]
-        df_total_in_out["Cars_per_Lane_In_per_Second"] = df_total_in_out["Count_Cars"] / (df_total_in_out["Video_Length (s)"] * df_total_in_out["Estimated_Lanes_In"])
-        df_total_in_out["Cars_per_Lane_Out_per_Second"] = df_total_in_out["Count_Cars"] / (df_total_in_out["Video_Length (s)"] * df_total_in_out["Estimated_Lanes_Out"])
-        df_total_in_out["Avg_Cars_per_Lane_per_Second"] = (df_total_in_out["Cars_per_Lane_Out_per_Second"] + df_total_in_out["Cars_per_Lane_In_per_Second"])/2
+        lanes = df_total_in_out["Estimated_Lanes"].replace(0, np.nan)
+        df_total_in_out["Cars_per_Lane_per_Second"] = (
+            df_total_in_out["Count_Cars"] / (df_total_in_out["Video_Length (s)"] * lanes)
+        )
     else:
         df_total_in_out["Cars_per_Second"] = np.nan
-        df_total_in_out["Cars_per_Lane_In_per_Second"] = np.nan
-        df_total_in_out["Cars_per_Lane_Out_per_Second"] = np.nan
-        df_total_in_out["Avg_Cars_per_Lane_per_Second"] = np.nan
+        df_total_in_out["Cars_per_Lane_per_Second"] = np.nan
 
     # Write CSVs
     df_full.to_csv(output_total_csv_path, index=False)
