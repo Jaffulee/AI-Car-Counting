@@ -6,6 +6,26 @@ __pycache__/
 # yolo downloads
 *.pt
 
+# -------------------------
+# Ignore all videos and CSVs
+# -------------------------
+*.mp4
+*.csv
+
+# -------------------------
+# Allow demo input videos
+# -------------------------
+!data/road_video.mp4
+!data/road_video_2.mp4
+
+# -------------------------
+# Allow demo outputs 
+# -------------------------
+!output_data/road_video*_Cars_detected*.csv
+!output_data/road_video_2*_Cars_detected*.csv
+!output_data/all_videos/*.csv
+
+
 # C extensions
 *.so
 
