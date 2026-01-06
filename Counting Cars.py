@@ -384,6 +384,10 @@ cull_time_seconds = 60 * 60  # kept for parity; your counting uses frames-since-
 # # Video writer codec
 # FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 
+all_df_full = []
+all_df_fact = []
+all_df_dim = []
+all_df_agg = []
 
 for output_ID, video_path in enumerate(video_paths, start=1):
     video_name = video_path.stem
@@ -850,3 +854,20 @@ for output_ID, video_path in enumerate(video_paths, start=1):
     print(df)
     print(df_fileinfo_lookup)
     print(df_total_in_out)
+    all_df_full.append(df_full.copy())
+    all_df_fact.append(df.copy())
+    all_df_dim.append(df_fileinfo_lookup.copy())
+    all_df_agg.append(df_total_in_out.reset_index().copy()) 
+
+OUTPUT_MASTER_DIR = OUTPUT_DATA_DIR / "all_videos"
+OUTPUT_MASTER_DIR.mkdir(parents=True, exist_ok=True)
+
+df_full_all = pd.concat(all_df_full, ignore_index=True) if all_df_full else pd.DataFrame()
+df_fact_all = pd.concat(all_df_fact, ignore_index=True) if all_df_fact else pd.DataFrame()
+df_dim_all  = pd.concat(all_df_dim,  ignore_index=True) if all_df_dim  else pd.DataFrame()
+df_agg_all  = pd.concat(all_df_agg,  ignore_index=True) if all_df_agg  else pd.DataFrame()
+
+df_full_all.to_csv(OUTPUT_MASTER_DIR / "Cars_detected.csv", index=False)
+df_fact_all.to_csv(OUTPUT_MASTER_DIR / "Cars_detected_fact.csv", index=False)
+df_dim_all.to_csv(OUTPUT_MASTER_DIR / "Cars_detected_dim.csv", index=False)
+df_agg_all.to_csv(OUTPUT_MASTER_DIR / "Cars_detected_agg.csv", index=False)
