@@ -190,6 +190,64 @@ These outputs are structured for easy ingestion into SQL, BI tools, or further P
 
 <hr>
 
+<h2>Sample Output (Aggregated)</h2>
+
+<p>
+Example rows from <code>output_data/all_videos/Cars_detected_agg.csv</code>.
+Values are lightly formatted for readability (lane estimates and rate metrics rounded).
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>In_Out</th>
+      <th>Filename_ID</th>
+      <th>Video_Length (s)</th>
+      <th>Count_Cars</th>
+      <th>Avg_Angle (deg)</th>
+      <th>Avg_Speed (px/s)</th>
+      <th>Estimated_Lanes</th>
+      <th>Cars_per_Second</th>
+      <th>Cars_per_Lane_per_Second</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>In</td>
+      <td>1</td>
+      <td>3.3</td>
+      <td>4</td>
+      <td>-105.7</td>
+      <td>202.8</td>
+      <td><strong>2.50</strong></td>
+      <td><strong>1.21</strong></td>
+      <td><strong>0.48</strong></td>
+    </tr>
+    <tr>
+      <td>Out</td>
+      <td>1</td>
+      <td>3.3</td>
+      <td>4</td>
+      <td>-124.5</td>
+      <td>625.0</td>
+      <td><strong>3.20</strong></td>
+      <td><strong>1.21</strong></td>
+      <td><strong>0.38</strong></td>
+    </tr>
+  </tbody>
+</table>
+
+<p style="font-size: 0.95em;">
+Notes:
+<ul>
+  <li><strong>Estimated_Lanes</strong> is derived from KMeans inertia curvature on event center points (In/Out handled separately).</li>
+  <li><strong>Cars_per_Lane_per_Second</strong> = Count_Cars / (Video_Length × Estimated_Lanes).</li>
+</ul>
+</p>
+
+
+<hr>
+
 <h2>Related Projects</h2>
 
 <p>
