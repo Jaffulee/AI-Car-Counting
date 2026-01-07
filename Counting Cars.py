@@ -476,7 +476,7 @@ for output_ID, video_path in enumerate(video_paths, start=1):
 
 
     # fallback id assignment when YOLO does not provide an ID
-    my_global_id_counter = 10000
+    my_global_id_counter = -2
 
     frame_idx = 0
     while True:
@@ -520,8 +520,8 @@ for output_ID, video_path in enumerate(video_paths, start=1):
 
             # if no model_id, assign a stable fallback id for this detection instance
             # (still not great without tracking, but avoids crashing)
-            if model_id < 0:
-                my_global_id_counter += 1
+            if model_id == -1:
+                my_global_id_counter -= 1
                 model_id = my_global_id_counter
 
             current_dets.append(
